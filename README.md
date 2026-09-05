@@ -146,16 +146,22 @@ This is Paper 3 in a research series:
 | 2 | Adversarial Code Review | [10.5281/zenodo.22357507](https://doi.org/10.5281/zenodo.22357507) |
 | 3 | Execution-Guided Detection (this work) | Coming soon |
 
+
+**DOI**: [10.5281/zenodo.22375008](https://doi.org/10.5281/zenodo.22375008)
+
+
 ## Citation
 
 ```bibtex
+
 @misc{mukati2026execution,
   author = {Mukati, Aman},
-  title = {Execution-Guided Detection of Semantic Code Perturbations},
+  title = {Execution-Guided Detection of Semantic Code Perturbations in AI-Generated Code},
   year = {2026},
   publisher = {Zenodo},
-  doi = {10.5281/zenodo.XXXXXXX}
+  doi = {10.5281/zenodo.22375008}
 }
+
 ```
 
 ## License
