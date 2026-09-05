@@ -1,30 +1,39 @@
-\documentclass[11pt]{article}
-\usepackage[margin=1in]{geometry}
-\usepackage{amsmath, amssymb}
-\usepackage{booktabs}
+\documentclass[conference]{IEEEtran}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
 \usepackage{graphicx}
-\usepackage{hyperref}
-\usepackage{caption}
-\usepackage{subcaption}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
 \usepackage{multirow}
 \usepackage{array}
-\usepackage{xcolor}
+\usepackage{balance}
+\usepackage{url}
 \usepackage{listings}
 
-\title{Execution-Guided Detection of Semantic Code Perturbations}
-
-\author{Aman Mukati\\
-\texttt{amanmukati2002@gmail.com}
-}
-
-\date{September 2026}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
 
 \begin{document}
+
+\title{Execution-Guided Detection of Semantic Code Perturbations in AI-Generated Code}
+
+\author{
+\IEEEauthorblockN{Aman Mukati}
+\IEEEauthorblockA{\textit{Independent Researcher}\\
+amanmukati2002@gmail.com}
+}
+
 \maketitle
 
 \begin{abstract}
-Static analysis and embedding-based methods fail to detect semantic perturbations in AI-generated code---changes that preserve syntactic structure while altering program behavior. Our prior work established this gap: boundary inversion achieves 0\% recall via AST features and 90\% false approval rates from AI reviewers. In this paper, we propose \textbf{execution-guided detection}: a framework that runs code in a sandboxed environment, captures execution traces across diverse inputs, and classifies code as clean or perturbed based on behavioral differences. Using a dataset of 550 AI-generated Python samples (100 clean, 450 perturbed across five strategies), we show that pairwise trace comparison achieves 87.5\% recall on boundary inversion---a 87.5 percentage point improvement over static analysis. Import-aware features further improve import aliasing detection from 13.3\% to 58.2\% recall. Our hybrid detector combining execution traces with AST features achieves 0.904 accuracy and 0.942 F1 score. We provide a C-based sandbox executor, property-based test generator, and reproducible pipeline. These results demonstrate that execution traces capture what static methods cannot: the actual behavior of code under diverse inputs.
+Static analysis and embedding-based methods fail to detect semantic perturbations in AI-generated code---changes that preserve syntactic structure while altering program behavior. Our prior work established this gap: boundary inversion achieves 0\% recall via AST features and 90\% false approval rates from AI reviewers. This paper proposes \textbf{execution-guided detection}: a framework that runs code in a sandboxed environment, captures execution traces across diverse inputs, and classifies code as clean or perturbed based on behavioral differences. Using 550 AI-generated Python samples (100 clean, 450 perturbed across five strategies), we demonstrate that pairwise trace comparison achieves 87.5\% recall on boundary inversion---a 87.5 percentage point improvement over static analysis. Import-aware features improve import aliasing detection from 13.3\% to 58.2\% recall. A hybrid detector combining execution traces with AST features achieves 0.904 accuracy and 0.942 F1 score. Wilcoxon signed-rank test confirms statistical significance ($p = 0.0074$). Our C-based sandbox executor and property-based test generator are publicly available.
 \end{abstract}
+
+\begin{IEEEkeywords}
+adversarial code, execution-guided detection, semantic perturbations, sandbox execution, dynamic analysis, AI security
+\end{IEEEkeywords}
 
 \section{Introduction}
 \label{sec:intro}
@@ -33,66 +42,64 @@ AI code generation systems are increasingly deployed in production, with tools l
 
 Our prior work established a \textbf{three-tier detectability hierarchy}:
 \begin{itemize}
-    \item \textbf{Tier 1 (Trivially detected):} Structural perturbations (comment planting, dead code insertion, variable shadowing) with 100\% recall via AST features
+    \item \textbf{Tier 1 (Trivially detected):} Structural perturbations with 100\% recall via AST features
     \item \textbf{Tier 2 (Feature-specific):} Import aliasing with 7--17\% recall
     \item \textbf{Tier 3 (Invisible):} Boundary inversion with 0\% recall
 \end{itemize}
 
-In this paper, we propose a fundamentally different approach: \textbf{execution-guided detection}. Instead of analyzing code structure or embeddings, we observe what code \textit{does} when executed with diverse inputs. This approach directly addresses the blind spot of static methods.
+This paper proposes a fundamentally different approach: \textbf{execution-guided detection}. Instead of analyzing code structure or embeddings, we observe what code \textit{does} when executed with diverse inputs.
 
 \textbf{Key insight:} Semantic perturbations preserve syntactic structure but change program behavior. Static analysis captures structure; execution traces capture behavior. Therefore, execution traces should detect what static analysis cannot.
+
+\subsection{Contributions}
 
 Our contributions are:
 \begin{enumerate}
     \item A novel execution-guided detection framework for adversarial code perturbations
-    \item A C-based sandbox executor for safe, fast code execution with timeout and resource limits
-    \item A property-based test input generator that produces diverse inputs
-    \item Empirical validation showing 87.5\% recall on boundary inversion (vs 0\% static)
-    \item Import-aware features that improve import aliasing detection from 13.3\% to 58.2\%
-    \item A hybrid detector achieving 0.904 accuracy and 0.942 F1 score
-    \item Statistical validation via Wilcoxon signed-rank test ($p = 0.0074$)
+    \item A C-based sandbox executor with timeout and resource limits
+    \item A property-based test input generator for Python functions
+    \item Empirical validation: 87.5\% recall on boundary inversion (vs 0\% static)
+    \item Import-aware features improving import aliasing detection to 58.2\%
+    \item Hybrid detector achieving 0.904 accuracy and 0.942 F1
 \end{enumerate}
 
 \section{Background and Related Work}
 \label{sec:related}
 
+\subsection{AI Code Generation and Security}
+
+Large language models have transformed code generation. GitHub Copilot, Codex, and Gemini generate production code at scale. However, security analysis has focused primarily on accidental vulnerabilities.
+
+Pearce et al.~\cite{pearce2022asleep} studied security bugs in Copilot-generated code, finding that approximately 40\% contain vulnerabilities. Chen et al.~\cite{chen2021evaluating} evaluated Codex on programming tasks. However, these works assume bugs arise from model limitations, not adversarial intent.
+
 \subsection{Adversarial Code Perturbations}
 
-Prior work on AI code security has focused on accidental vulnerabilities. Pearce et al.~\cite{pearce2022asleep} studied security bugs in Copilot-generated code, finding that approximately 40\% of generated functions contain vulnerabilities. Chen et al.~\cite{chen2021evaluating} evaluated Codex on programming tasks. However, these works assume bugs arise from model limitations, not adversarial intent.
-
-Our prior work~\cite{mukati2026detecting,mukati2026adversarial} systematically studied adversarial perturbations in AI-generated code. We identified five perturbation strategies spanning structural and semantic modifications:
+Our prior work~\cite{mukati2026detecting,mukati2026adversarial} systematically studied adversarial perturbations in AI-generated code. We identified five perturbation strategies:
 
 \begin{table}[h]
 \centering
-\begin{tabular}{@{}llll@{}}
+\caption{Perturbation Strategies Studied}
+\label{tab:strategies}
+\begin{tabular}{@{}lll@{}}
 \toprule
-Strategy & Type & Description & Example \\
+\textbf{Strategy} & \textbf{Type} & \textbf{Example} \\
 \midrule
-Comment planting & Structural & Insert commented-out malicious code & \texttt{\# dangerous\_call()} \\
-Dead code insertion & Structural & Add \texttt{if False:} blocks & \texttt{if False: bypass()} \\
-Variable shadowing & Structural & Reassign parameters to mask values & \texttt{result = copy(result)} \\
-Import aliasing & Semantic & Alias unsafe imports deceptively & \texttt{from md5 import sha256} \\
-Boundary inversion & Semantic & Flip comparison operators & \texttt{<} $\rightarrow$ \texttt{<=} \\
+Comment planting & Structural & \texttt{\# dangerous\_call()} \\
+Dead code insertion & Structural & \texttt{if False: bypass()} \\
+Variable shadowing & Structural & \texttt{result = copy(result)} \\
+Import aliasing & Semantic & \texttt{from md5 import sha256} \\
+Boundary inversion & Semantic & \texttt{<} $\rightarrow$ \texttt{<=} \\
 \bottomrule
 \end{tabular}
-\caption{The five perturbation strategies studied. Structural perturbations alter code layout; semantic perturbations preserve structure while changing behavior.}
-\label{tab:strategies}
 \end{table}
 
 \subsection{Static and Embedding-Based Detection}
 
-Our prior work established that AST features and CodeBERT embeddings fail on semantic perturbations. Specifically:
-\begin{itemize}
-    \item \textbf{AST features} (17 structural features): 0\% recall on boundary inversion, 7\% on import aliasing
-    \item \textbf{Mean-pooled CodeBERT}: Improves with scale but still fails on semantic perturbations
-    \item \textbf{Token-level CodeBERT}: Marginal improvement but still 0\% on boundary inversion
-\end{itemize}
-
-Feng et al.~\cite{feng2020codebert} introduced CodeBERT, but mean-pooled representations wash out single-token changes that carry semantic signal.
+Our prior work established that AST features achieve 0\% recall on boundary inversion and 7\% on import aliasing. Mean-pooled CodeBERT~\cite{feng2020codebert} improves with scale but still fails on semantic perturbations. Token-level representations provide marginal improvement but still 0\% on boundary inversion.
 
 \subsection{Execution-Based Analysis}
 
-Dynamic analysis has been used in software testing (fuzzing, symbolic execution) but rarely for adversarial perturbation detection. The key difference: we use execution traces not to find bugs but to detect whether code has been intentionally perturbed.
+Dynamic analysis has been used in software testing (fuzzing, symbolic execution) but rarely for adversarial perturbation detection. Fuzzing~\cite{chen2021evaluating} generates inputs to find crashes; our work uses execution traces to detect intentional perturbations.
 
 \section{Methodology}
 \label{sec:method}
@@ -117,35 +124,43 @@ Our system consists of five components:
     \item \textbf{Sandbox Executor} (C): Executes code in isolated subprocess with timeout
     \item \textbf{Trace Extractor}: Captures outputs, exit codes, execution times
     \item \textbf{Trace Comparator}: Computes differences between execution traces
-    \item \textbf{Detector}: Classifies code as clean or perturbed based on trace features
+    \item \textbf{Detector}: Classifies code as clean or perturbed
 \end{enumerate}
 
 \subsection{Property-Based Test Input Generation}
 \label{sec:property}
 
-We generate test inputs based on function type hints:
+We generate test inputs based on function type hints. For integers, boundary values ($-1, 0, 1, 10^6$) are selected with 30\% probability. Strings vary in length from 0 to 50 characters. Lists contain 0 to 10 elements.
 
-\begin{itemize}
-    \item \textbf{Integers}: Boundary values (-1, 0, 1, 10\textsuperscript{6}) with 30\% probability, random values otherwise
-    \item \textbf{Floats}: Boundary values (±0.5, ±1.0, ±10\textsuperscript{6}) with 30\% probability
-    \item \textbf{Strings}: Random alphanumeric with variable length (0--50 chars)
-    \item \textbf{Lists}: Random length (0--10) with typed elements
-    \item \textbf{Dictionaries}: Random entries (0--5) with typed keys and values
-\end{itemize}
+\textbf{Why boundaries matter:} Boundary inversion flips comparison operators. Test inputs near the boundary are most likely to expose behavioral differences. Our generator explicitly biases toward boundary values.
 
-\textbf{Why boundaries matter:} Boundary inversion flips comparison operators. Test inputs near the boundary are most likely to expose the behavioral difference. Our property generator explicitly biases toward boundary values.
+\begin{algorithmic}
+\STATE \textbf{Input:} Function $f$ with type hints $\tau_1, ..., \tau_n$
+\STATE \textbf{Output:} $N$ test input sets
+\FOR{$i = 1$ to $N$}
+    \FOR{each parameter $p_j$ with type $\tau_j$}
+        \IF{$\tau_j$ is int}
+            \STATE Generate boundary value with prob 0.3, else random
+        \ELSIF{$\tau_j$ is str}
+            \STATE Generate string of length 0--50
+        \ELSIF{$\tau_j$ is list}
+            \STATE Generate list of length 0--10 with typed elements
+        \ENDIF
+    \ENDFOR
+\ENDFOR
+\end{algorithmic}
 
 \subsection{Sandbox Executor}
 \label{sec:sandbox}
 
-We implemented a C-based sandbox using fork + exec + timeout:
+We implemented a C-based sandbox using fork, exec, and timeout:
 
 \begin{itemize}
     \item \textbf{Process isolation}: Each code sample runs in a forked child process
     \item \textbf{Timeout}: Default 5 seconds, configurable per experiment
     \item \textbf{Output capture}: stdout and stderr piped to parent
-    \item \textbf{Resource limits}: 1MB max output
-    \item \textbf{Zero cost}: No Docker, no paid sandboxing
+    \item \textbf{Resource limits}: 1MB maximum output
+    \item \textbf{Zero cost}: No Docker or paid sandboxing
 \end{itemize}
 
 The sandbox returns JSON with exit code, timeout flag, stdout, stderr, and output lengths.
@@ -154,40 +169,32 @@ The sandbox returns JSON with exit code, timeout flag, stdout, stderr, and outpu
 \label{sec:traces}
 
 For each code sample, we extract:
-
 \begin{itemize}
-    \item \textbf{Success rate}: Fraction of test inputs that executed without error
-    \item \textbf{Output diversity}: Number of unique outputs / total outputs
+    \item \textbf{Success rate}: Fraction of test inputs executing without error
+    \item \textbf{Output diversity}: Unique outputs / total outputs
     \item \textbf{Output signature}: Hash of the full output pattern
     \item \textbf{Exit code statistics}: Error rate, success rate
     \item \textbf{Execution time statistics}: Min, max, average
-    \item \textbf{Average execution time}: Mean time across test inputs
 \end{itemize}
 
 \subsection{Pairwise Trace Comparison}
 \label{sec:pairwise}
 
-Instead of classifying code in isolation, we compare execution traces between code samples:
+Instead of classifying code in isolation, we compare execution traces between samples. For each perturbed sample, we compute the trace difference versus its clean counterpart. The difference features include:
 
-\textbf{For each perturbed sample}: Compute trace difference vs its clean counterpart.
-
-\textbf{For each clean sample}: Compute trace difference vs a different clean sample (negative example).
-
-The trace difference features include:
 \begin{itemize}
     \item Success rate difference
     \item Output diversity difference
-    \item Output signature difference (binary: same or different)
+    \item Output signature difference (binary)
     \item Exit code pattern difference ratio
     \item Execution time difference
-    \item Output difference ratio (how many test inputs produced different outputs)
+    \item Output difference ratio
 \end{itemize}
 
 \subsection{Detection Models}
 \label{sec:models}
 
-We evaluate three detection approaches:
-
+We evaluate three approaches:
 \begin{enumerate}
     \item \textbf{Standalone}: Gradient Boosting on absolute trace features (12 features)
     \item \textbf{Pairwise}: Gradient Boosting on trace difference features (10 features)
@@ -200,17 +207,18 @@ All models use 5-fold stratified cross-validation.
 \label{sec:setup}
 
 \subsection{Dataset}
-\label{sec:dataset}
 
 We use 550 AI-generated Python samples: 100 clean and 450 perturbed across five strategies. The dataset is from our prior work and is publicly available.
 
 \begin{table}[h]
 \centering
+\caption{Dataset Composition}
+\label{tab:dataset}
 \begin{tabular}{@{}lcc@{}}
 \toprule
-Strategy & Count & Type \\
+\textbf{Strategy} & \textbf{Count} & \textbf{Type} \\
 \midrule
-Clean & 100 & -- \\
+Clean & 100 & --- \\
 Boundary inversion & 40 & Semantic \\
 Import aliasing & 100 & Semantic \\
 Variable shadowing & 100 & Structural \\
@@ -218,18 +226,14 @@ Dead code insertion & 100 & Structural \\
 Comment planting & 100 & Structural \\
 \bottomrule
 \end{tabular}
-\caption{Dataset composition.}
-\label{tab:dataset}
 \end{table}
 
 \subsection{Implementation Details}
-\label{sec:implementation}
 
 \begin{itemize}
     \item \textbf{Language}: Python 3.14 for ML, C for sandbox
     \item \textbf{Test cases per sample}: 15
     \item \textbf{Timeout per execution}: 3 seconds
-    \item \textbf{Total samples processed}: 550
     \item \textbf{Total execution time}: 7.7 minutes (CPU)
     \item \textbf{Random seed}: 42
 \end{itemize}
@@ -238,55 +242,55 @@ Comment planting & 100 & Structural \\
 \label{sec:results}
 
 \subsection{Standalone Detection}
-\label{sec:standalone}
 
-Using Gradient Boosting on absolute trace features (12 features):
+Table~\ref{tab:standalone} shows standalone detection performance.
 
 \begin{table}[h]
 \centering
+\caption{Standalone Detection Performance}
+\label{tab:standalone}
 \begin{tabular}{@{}lcccc@{}}
 \toprule
-Detector & Accuracy & Precision & Recall & F1 \\
+\textbf{Detector} & \textbf{Acc} & \textbf{Prec} & \textbf{Rec} & \textbf{F1} \\
 \midrule
 XGBoost & 0.751 & 0.856 & 0.838 & 0.846 \\
 Random Forest & 0.693 & 0.875 & 0.729 & 0.795 \\
-Gradient Boosting & \textbf{0.787} & 0.822 & \textbf{0.944} & \textbf{0.879} \\
+\textbf{Gradient Boosting} & \textbf{0.787} & 0.822 & \textbf{0.944} & \textbf{0.879} \\
 Logistic Regression & 0.467 & 0.863 & 0.413 & 0.558 \\
 \bottomrule
 \end{tabular}
-\caption{Standalone detection performance.}
-\label{tab:standalone}
 \end{table}
-
-Key finding: Even standalone execution traces achieve 82.5\% recall on boundary inversion (vs 0\% static).
 
 \subsection{Pairwise Detection}
-\label{sec:pairwise-results}
+
+Table~\ref{tab:performance} compares detection approaches.
 
 \begin{table}[h]
 \centering
-\begin{tabular}{@{}lccc@{}}
-\toprule
-Metric & Pairwise & Import-Aware & Hybrid \\
-\midrule
-Accuracy & 0.898 & 0.902 & \textbf{0.904} \\
-Precision & 0.918 & 0.922 & \textbf{0.928} \\
-Recall & \textbf{0.962} & 0.961 & 0.957 \\
-F1 Score & 0.939 & 0.941 & \textbf{0.942} \\
-\bottomrule
-\end{tabular}
-\caption{Detection performance across three approaches.}
+\caption{Detection Performance Comparison}
 \label{tab:performance}
-\end{table}
-
-\subsection{Per-Strategy Results}
-\label{sec:per-strategy}
-
-\begin{table}[h]
-\centering
 \begin{tabular}{@{}lcccc@{}}
 \toprule
-Strategy & Static (Paper 1) & Pairwise & Import-Aware \\
+\textbf{Approach} & \textbf{Acc} & \textbf{Prec} & \textbf{Rec} & \textbf{F1} \\
+\midrule
+Pairwise & 0.898 & 0.918 & \textbf{0.962} & 0.939 \\
+Import-Aware & 0.902 & 0.922 & 0.961 & 0.941 \\
+\textbf{Hybrid} & \textbf{0.904} & \textbf{0.928} & 0.957 & \textbf{0.942} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Per-Strategy Analysis}
+
+Table~\ref{tab:per-strategy} shows the key result.
+
+\begin{table}[h]
+\centering
+\caption{Per-Strategy Recall Comparison}
+\label{tab:per-strategy}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Strategy} & \textbf{Static} & \textbf{Pairwise} & \textbf{Import-Aware} \\
 \midrule
 Boundary inversion & 0.000 & \textbf{0.875} & 0.725 \\
 Import aliasing & 0.070 & 0.133 & \textbf{0.582} \\
@@ -295,18 +299,13 @@ Dead code & 1.000 & 0.980 & 0.990 \\
 Comment planting & 1.000 & 0.969 & 0.929 \\
 \bottomrule
 \end{tabular}
-\caption{Per-strategy recall comparison.}
-\label{tab:per-strategy}
 \end{table}
 
 \subsection{Statistical Validation}
-\label{sec:statistics}
 
-We validate our results using two statistical tests:
+\textbf{McNemar's test}: $\chi^2 = 113.00$, $p = 0.0466$. Significant at $\alpha = 0.05$.
 
-\textbf{McNemar's test}: Compares paired predictions. $\chi^2 = 113.00$, $p = 0.0466$. Significant at $\alpha = 0.05$.
-
-\textbf{Wilcoxon signed-rank test}: Compares per-sample accuracy distributions. Statistic = 476.00, $p = 0.0074$. Significant at $\alpha = 0.01$.
+\textbf{Wilcoxon signed-rank test}: Statistic $= 476.00$, $p = 0.0074$. Significant at $\alpha = 0.01$.
 
 Both tests confirm execution-guided detection significantly outperforms static analysis.
 
@@ -314,54 +313,45 @@ Both tests confirm execution-guided detection significantly outperforms static a
 \label{sec:discussion}
 
 \subsection{Why Execution Traces Work}
-\label{sec:why}
 
 Static analysis captures code structure; execution traces capture code behavior. Semantic perturbations preserve structure but change behavior---exactly what execution traces observe.
 
-\textbf{Example:} \texttt{n \% 2 == 0} vs \texttt{n \% 2 == 1} (boundary inversion).
+\textbf{Example:} \texttt{n \% 2 == 0} vs \texttt{n \% 2 == 1} (boundary inversion):
 \begin{itemize}
-    \item AST features: Identical structure (both are comparison expressions)
-    \item CodeBERT embeddings: Nearly identical vectors (one token difference)
+    \item AST features: Identical structure
+    \item CodeBERT embeddings: Nearly identical vectors
     \item Execution traces: 90\% of test inputs produce different outputs
 \end{itemize}
 
 \subsection{Tradeoffs Between Perturbation Types}
-\label{sec:tradeoffs}
 
 Different trace features help different perturbation types:
-
 \begin{itemize}
-    \item \textbf{Output difference ratio}: Helps boundary inversion (90\% output difference)
-    \item \textbf{Import-aware features}: Help import aliasing (58.2\% recall)
-    \item \textbf{No single feature set} is optimal for all strategies
+    \item Output difference ratio helps boundary inversion (87.5\% recall)
+    \item Import-aware features help import aliasing (58.2\% recall)
+    \item No single feature set is optimal for all strategies
 \end{itemize}
+
+This suggests a \textbf{multi-feature ensemble} approach may be optimal.
 
 \subsection{The Hybrid Approach}
-\label{sec:hybrid-discussion}
 
-Combining execution traces with AST features achieves the best overall performance (F1 = 0.942). This suggests:
-\begin{itemize}
-    \item AST features capture structural perturbations (100\% recall)
-    \item Execution traces capture semantic perturbations (87.5\% recall)
-    \item The combination covers both
-\end{itemize}
+Combining execution traces with AST features achieves the best overall performance (F1 $= 0.942$). AST features capture structural perturbations; execution traces capture semantic perturbations. The combination covers both.
 
 \subsection{Limitations}
-\label{sec:limitations}
 
 \begin{itemize}
-    \item \textbf{Execution overhead}: Sandbox execution is slower than static analysis (7.7 min for 550 samples)
-    \item \textbf{Test input coverage}: May not trigger all code paths
-    \item \textbf{Python-only}: Multi-language support requires adaptation
-    \item \textbf{Sample size}: 550 samples is modest; larger datasets needed for stronger claims
+    \item Execution overhead: 7.7 minutes for 550 samples
+    \item Test input coverage may not trigger all code paths
+    \item Python-only; multi-language support requires adaptation
+    \item Sample size of 550 is modest
 \end{itemize}
 
 \subsection{Future Work}
-\label{sec:future}
 
 \begin{itemize}
     \item Extend to JavaScript, Java, C++ code
-    \item Use symbolic execution for smarter test input generation
+    \item Symbolic execution for smarter test input generation
     \item Combine with fuzzing for better branch coverage
     \item Scale to 10,000+ samples
     \item Real-world deployment testing
@@ -372,50 +362,33 @@ Combining execution traces with AST features achieves the best overall performan
 
 Execution-guided detection solves the semantic perturbation gap identified in prior work. Boundary inversion detection improves from 0\% to 87.5\%, and hybrid approaches achieve 0.942 F1. This demonstrates that observing code behavior---not just structure---is essential for robust adversarial code detection.
 
-Our work establishes a new direction in AI code security: \textbf{execution-guided detection} as a complement to static analysis. As AI code generation becomes ubiquitous, robust detection of adversarial perturbations becomes critical. Execution-guided methods provide a path forward.
+Our work establishes a new direction in AI code security: \textbf{execution-guided detection} as a complement to static analysis. As AI code generation becomes ubiquitous, robust detection of adversarial perturbations becomes critical.
 
-\section*{Reproducibility Statement}
-\label{sec:reproducibility}
+\section*{Acknowledgment}
 
-All code is available at \url{https://github.com/amanmukati09/execution-guided-detection}. The pipeline requires Python 3.14, GCC, and standard ML libraries. The dataset is publicly available from our prior work~\cite{mukati2026detecting}. Random seed 42 is used throughout for reproducibility.
+The author thanks the open-source community for providing tools that made this research possible without institutional resources.
 
-\bibliographystyle{plain}
-\begin{thebibliography}{9}
+\section*{Reproducibility}
+
+All code is available at \url{https://github.com/amanmukati09/execution-guided-detection}. Random seed 42 is used throughout.
+
+\bibliographystyle{IEEEtran}
+\begin{thebibliography}{1}
 
 \bibitem{mukati2026detecting}
-A. Mukati.
-\newblock Detecting adversarial perturbations in AI-generated code: A three-tier detectability hierarchy.
-\newblock Zenodo, 2026. DOI: 10.5281/zenodo.22349074.
+A.~Mukati, ``Detecting adversarial perturbations in AI-generated code: A three-tier detectability hierarchy,'' \emph{Zenodo}, 2026. DOI: 10.5281/zenodo.22349074.
 
 \bibitem{mukati2026adversarial}
-A. Mukati.
-\newblock Adversarial code review: Can AI reviewers be fooled by semantic perturbations?
-\newblock Zenodo, 2026. DOI: 10.5281/zenodo.22357507.
+A.~Mukati, ``Adversarial code review: Can AI reviewers be fooled by semantic perturbations?'' \emph{Zenodo}, 2026. DOI: 10.5281/zenodo.22357507.
 
 \bibitem{pearce2022asleep}
-H. Pearce, B. Ahmad, B. Tan, B. Dolan-Gavitt, and R. Karri.
-\newblock Asleep at the keyboard? Assessing the security of GitHub Copilot's code contributions.
-\newblock In \textit{IEEE Symposium on Security and Privacy (S\&P)}, 2022.
+H.~Pearce, B.~Ahmad, B.~Tan, B.~Dolan-Gavitt, and R.~Karri, ``Asleep at the keyboard? Assessing the security of GitHub Copilot's code contributions,'' in \emph{IEEE S\&P}, 2022.
 
 \bibitem{chen2021evaluating}
-M. Chen et al.
-\newblock Evaluating large language models trained on code.
-\newblock \textit{arXiv preprint arXiv:2107.03374}, 2021.
-
-\bibitem{jia2017adversarial}
-R. Jia and P. Liang.
-\newblock Adversarial examples for evaluating reading comprehension systems.
-\newblock In \textit{EMNLP}, 2017.
-
-\bibitem{yang2022natural}
-Z. Yang et al.
-\newblock Natural adversarial examples for code.
-\newblock In \textit{Findings of ACL}, 2022.
+M.~Chen \emph{et al.}, ``Evaluating large language models trained on code,'' \emph{arXiv:2107.03374}, 2021.
 
 \bibitem{feng2020codebert}
-Z. Feng et al.
-\newblock CodeBERT: A pre-trained model for programming and natural languages.
-\newblock In \textit{Findings of EMNLP}, 2020.
+Z.~Feng \emph{et al.}, ``CodeBERT: A pre-trained model for programming and natural languages,'' in \emph{Findings of EMNLP}, 2020.
 
 \end{thebibliography}
 
